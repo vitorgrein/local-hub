@@ -1,0 +1,14 @@
+# Artefatos de build/empacotamento
+build/
+dist/
+*.egg-info/
+
+# Locks temporarios do LocalHub
+*.lock
+
+# Cache do Python
+__pycache__/
+*.py[cod]
+
+# Metadados do proprio LocalHub (se versionar este projeto com ele)
+.lhub/

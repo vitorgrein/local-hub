@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "localhub"
+version = "0.1.0"
+description = "Controle de versao local em Python puro (sem git), com commit/push/pull entre pastas."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Vitor" }]
+keywords = ["vcs", "versionamento", "git-like", "local"]
+
+[project.scripts]
+lhub = "localhub.cli:main"
+
+[tool.setuptools]
+packages = ["localhub"]
