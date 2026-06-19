@@ -9,5 +9,5 @@ compartilhada como "remoto".
 from .errors import LhubError
 from .repository import Repo
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = ["Repo", "LhubError", "__version__"]

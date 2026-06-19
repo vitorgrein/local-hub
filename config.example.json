@@ -1,0 +1,25 @@
+{
+  "_comentario": "Copie como config.json dentro de ~/.lhub-scheduler (ou em $LHUB_SCHEDULER_HOME). Configura os avisos do agendador.",
+  "email": {
+    "enabled": false,
+    "smtp_host": "smtp.empresa.com",
+    "smtp_port": 587,
+    "use_tls": true,
+    "use_ssl": false,
+    "username": "automacoes@empresa.com",
+    "password": "TROQUE-OU-USE-VARIAVEL",
+    "from": "automacoes@empresa.com",
+    "to": ["vitor@empresa.com"]
+  },
+  "webhook": {
+    "enabled": false,
+    "url": "https://outlook.office.com/webhook/SEU-WEBHOOK-AQUI",
+    "format": "teams"
+  },
+  "alerts": {
+    "on_failure": true,
+    "on_missed": true,
+    "missed_grace_min": 5,
+    "heartbeat_timeout_min": 3
+  }
+}

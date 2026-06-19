@@ -250,6 +250,167 @@ def cmd_pull(args):
     return 0
 
 
+def cmd_run(args):
+    from . import scheduler
+
+    rec = scheduler.run_now(args.target)
+    commit = _short(rec["commit"]) if rec["commit"] else "-"
+    dirt = " *mudancas nao commitadas*" if rec["dirty"] else ""
+    print("[%s] %s  %ss  (commit %s)%s" % (rec["status"], rec["name"], rec["duration_s"], commit, dirt))
+    if rec.get("log"):
+        print("log: %s" % rec["log"])
+    return 0 if rec["status"] in ("ok", "skipped") else 1
+
+
+def cmd_sched(args):
+    from . import scheduler
+    from .cron import CronExpr
+
+    sch = scheduler.Scheduler()
+    action = args.action
+
+    if action == "add":
+        if not args.target:
+            print("uso: lhub sched add <pasta-do-projeto>", file=sys.stderr)
+            return 2
+        info = sch.register(args.target)
+        print("registrado: %s -> %s" % (info["name"], info["path"]))
+        return 0
+
+    if action in ("rm", "remove"):
+        if not args.target:
+            print("uso: lhub sched rm <nome>", file=sys.stderr)
+            return 2
+        sch.unregister(args.target)
+        print("removido: %s" % args.target)
+        return 0
+
+    if action == "list":
+        projects = sch.store.read_projects()
+        if not projects:
+            print("(nenhum projeto registrado - use 'lhub sched add <pasta>')")
+            return 0
+        for name in sorted(projects):
+            info = projects[name]
+            try:
+                wf, _ = scheduler.load_workflow(info["path"])
+                sched_str = wf["schedule"] or "(sem schedule)"
+            except Exception as e:
+                sched_str = "ERRO: %s" % e
+            estado = "" if info.get("enabled", True) else "  [desativado]"
+            print("%-24s %-16s %s%s" % (name, sched_str, info["path"], estado))
+        return 0
+
+    if action == "status":
+        hist = sch.store.read_history(limit=args.max_count or 20)
+        if not hist:
+            print("(sem execucoes ainda)")
+            return 0
+        for rec in hist:
+            print("%s  %-10s %-20s %ss  commit=%s%s"
+                  % (rec["started"], rec["status"], rec["name"], rec["duration_s"],
+                     (rec["commit"] or "-")[:SHORT], " (sujo)" if rec.get("dirty") else ""))
+        return 0
+
+    if action == "logs":
+        if not args.target:
+            print("uso: lhub sched logs <nome>", file=sys.stderr)
+            return 2
+        hist = sch.store.read_history(limit=1, name=args.target)
+        if not hist or not hist[-1].get("log"):
+            print("(sem log para: %s)" % args.target)
+            return 0
+        sys.stdout.write(open(hist[-1]["log"], "r", encoding="utf-8", errors="replace").read())
+        return 0
+
+    if action == "daemon":
+        extra = "  + painel web em http://%s:%d" % (args.host, args.port) if args.web else ""
+        print("agendador rodando (Ctrl+C para parar). Estado em: %s%s" % (sch.store.home, extra))
+        try:
+            sch.daemon(on_event=lambda m: print(m), web=args.web, host=args.host, port=args.port)
+        except KeyboardInterrupt:
+            print("\nagendador parado.")
+        return 0
+
+    if action == "web":
+        from . import web
+
+        print("painel web em http://%s:%d  (Ctrl+C para parar)" % (args.host, args.port))
+        try:
+            web.serve(sch, host=args.host, port=args.port)
+        except KeyboardInterrupt:
+            print("\npainel parado.")
+        return 0
+
+    if action == "dashboard":
+        import os
+        import time
+        from . import monitor
+
+        try:
+            while True:
+                os.system("cls" if os.name == "nt" else "clear")
+                alive, seen = monitor.daemon_status(sch.store)
+                print("LocalHub - Agendador   daemon: %s   heartbeat: %s"
+                      % ("ON" if alive else "OFF",
+                         seen.isoformat(timespec="seconds") if seen else "nunca"))
+                print("-" * 92)
+                print("%-22s %-9s %-15s %-9s %-19s %-16s" %
+                      ("PROJETO", "SITUACAO", "SCHEDULE", "ULT.STATUS", "ULTIMO RUN", "PROXIMO"))
+                for r in monitor.health(sch.store):
+                    last = r.get("last") or {}
+                    sit = ("ATRASADO" if r.get("overdue")
+                           else "off" if not r.get("enabled")
+                           else "erro" if r.get("error") else "ok")
+                    print("%-22s %-9s %-15s %-9s %-19s %-16s" % (
+                        r["name"][:22], sit, str(r.get("schedule") or "-")[:15],
+                        str(last.get("status") or "-")[:9],
+                        str(last.get("started") or "-")[:19],
+                        str(r.get("next_run") or "-")[:16]))
+                print("-" * 92)
+                print("(atualiza a cada %ss - Ctrl+C para sair)" % args.interval)
+                time.sleep(args.interval)
+        except KeyboardInterrupt:
+            return 0
+
+    if action == "check":
+        from . import monitor, notify
+
+        alive, _ = monitor.daemon_status(sch.store)
+        overdue = [r["name"] for r in monitor.health(sch.store) if r.get("overdue")]
+        problems = []
+        if not alive:
+            problems.append("daemon offline")
+        if overdue:
+            problems.append("atrasados: " + ", ".join(overdue))
+        if problems:
+            msg = "; ".join(problems)
+            notify.notify(sch.store, "[lhub] watchdog", msg, on_error=lambda m: print(m, file=sys.stderr))
+            print("PROBLEMA: %s" % msg)
+            return 1
+        print("ok: daemon vivo e nenhum job atrasado")
+        return 0
+
+    if action == "config":
+        from . import notify
+
+        cfg = notify.load_config(sch.store)
+        print("config: %s" % notify.config_path(sch.store))
+        print("  e-mail:  %s" % ("habilitado" if cfg.get("email", {}).get("enabled") else "desabilitado"))
+        print("  webhook: %s" % ("habilitado" if cfg.get("webhook", {}).get("enabled") else "desabilitado"))
+        if not cfg:
+            print("  (crie esse arquivo para configurar avisos - veja o README)")
+        return 0
+
+    if action == "tick":
+        fired = sch.tick()
+        print("%d job(s) disparado(s)" % fired)
+        return 0
+
+    print("uso: lhub sched {add|rm|list|status|logs|daemon|dashboard|web|check|config|tick} [alvo]", file=sys.stderr)
+    return 2
+
+
 # ----------------------------------------------------------------- parser
 def build_parser():
     p = argparse.ArgumentParser(
@@ -341,6 +502,21 @@ def build_parser():
     sp.add_argument("remote", nargs="?", default="origin")
     sp.add_argument("branch", nargs="?")
     sp.set_defaults(func=cmd_pull)
+
+    sp = sub.add_parser("run", help="roda agora o workflow de um projeto")
+    sp.add_argument("target", help="nome registrado ou pasta do projeto")
+    sp.set_defaults(func=cmd_run)
+
+    sp = sub.add_parser("sched", help="agendador + painel (add/rm/list/status/logs/daemon/dashboard/web/check/config)")
+    sp.add_argument("action", nargs="?", default="list",
+                    help="add|rm|list|status|logs|daemon|dashboard|web|check|config|tick")
+    sp.add_argument("target", nargs="?", help="pasta do projeto (add) ou nome (rm/logs)")
+    sp.add_argument("-n", "--max-count", type=int, default=None, help="quantas linhas no status")
+    sp.add_argument("--web", action="store_true", help="no daemon, sobe tambem o painel web")
+    sp.add_argument("--host", default="127.0.0.1", help="host do painel web")
+    sp.add_argument("--port", type=int, default=8787, help="porta do painel web")
+    sp.add_argument("--interval", type=int, default=5, help="dashboard: segundos entre atualizacoes")
+    sp.set_defaults(func=cmd_sched)
 
     return p
 

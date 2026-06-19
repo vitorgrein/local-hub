@@ -1,0 +1,23 @@
+# Exemplo de workflow do agendador do LocalHub.
+# Copie como "workflow.yml" na raiz do projeto que voce quer agendar, depois:
+#   lhub sched add  C:\caminho\do\projeto
+#   lhub run <nome>           # roda na hora, para testar
+#   lhub sched daemon --web   # deixa o agendador rodando + painel
+
+name: cobranca-bradesco          # opcional; padrao = nome da pasta
+schedule: "0 7 * * 1-5"          # cron (min hora dia mes dia-semana): 07:00, seg-sex
+python: "C:/Users/voce/python/env/Scripts/python.exe"  # opcional; use {python} nos comandos
+workdir: "."                     # relativo a raiz do projeto
+timeout: 3600                    # segundos por passo (opcional)
+on_dirty: warn                   # warn | skip | run -> o que fazer com mudancas nao commitadas
+
+steps:
+  - name: run
+    run: "{python} run.py"
+  - name: daily
+    run: "{python} daily.py"
+  - name: funil
+    run: "{python} funil.py"
+
+on_failure:                      # opcional: roda se algum passo acima falhar
+  - run: "{python} notifica_erro.py"

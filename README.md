@@ -144,6 +144,67 @@ trava; quem ficar para trás recebe "não é fast-forward" e deve dar `pull` ant
 | `lhub push [remoto] [branch] [--force]` | envia commits |
 | `lhub pull [remoto] [branch]` | baixa e integra |
 
+## Agendador (`lhub sched`) + painel
+
+Roda suas automações versionadas em horários (cron), na própria máquina, sem
+depender do Agendador de Tarefas do Windows. Cada projeto traz um
+**`workflow.yml`** (estilo GitHub Actions); o agendador roda a **versão
+commitada**, captura log/histórico, mostra um **painel** e envia **avisos** de
+falha e de execução que **não rodou**.
+
+`workflow.yml` na raiz do projeto (veja [`workflow.example.yml`](workflow.example.yml)):
+
+```yaml
+name: cobranca-bradesco
+schedule: "0 7 * * 1-5"        # 07:00, seg-sex (min hora dia mes dia-semana)
+python: "C:/.../python.exe"    # use {python} nos comandos
+on_dirty: warn                 # warn | skip | run (mudancas nao commitadas)
+steps:
+  - run: "{python} run.py"
+  - run: "{python} daily.py"
+on_failure:
+  - run: "{python} notifica_erro.py"
+```
+
+Uso:
+
+```powershell
+lhub sched add C:\caminho\do\projeto   # registra (precisa ter workflow.yml)
+lhub run cobranca-bradesco             # roda agora (teste), amarrado ao commit
+lhub sched list                        # projetos + schedule
+lhub sched daemon --web                # agendador residente + painel web
+lhub sched dashboard                   # painel no terminal (atualiza sozinho)
+lhub sched status                      # historico das execucoes
+lhub sched logs cobranca-bradesco      # ultimo log
+lhub sched check                       # 1 checagem: avisa se daemon caiu ou ha atraso
+```
+
+| Comando | O que faz |
+|---|---|
+| `lhub sched add <pasta>` | registra um projeto (lê o `workflow.yml`) |
+| `lhub sched rm <nome>` | remove do agendador |
+| `lhub sched list` | lista projetos e seus schedules |
+| `lhub run <nome\|pasta>` | roda o workflow **agora** (gatilho manual) |
+| `lhub sched daemon [--web] [--host H] [--port P]` | loop residente; dispara os jobs vencidos a cada minuto |
+| `lhub sched web [--port P]` | só o painel web (somente leitura) |
+| `lhub sched dashboard [-n/--interval]` | painel no terminal |
+| `lhub sched status [-n]` | histórico recente |
+| `lhub sched logs <nome>` | último log de um projeto |
+| `lhub sched check` | watchdog pontual (sai ≠ 0 e avisa se houver problema) |
+| `lhub sched config` | mostra onde fica o `config.json` dos avisos |
+
+**Avisos (e-mail/webhook):** crie `~/.lhub-scheduler/config.json` a partir de
+[`config.example.json`](config.example.json). O agendador avisa quando um job
+**falha** e quando um horário previsto passou **sem rodar** (atraso). O `daemon`
+grava um *heartbeat*; o painel mostra se o próprio agendador caiu.
+
+> O agendador depende de **PyYAML** (instalado junto pelo `pip`). Se você instala
+> por wheel numa máquina sem internet, garanta que o `pyyaml` esteja disponível lá.
+
+**Watchdog de última instância:** se a VM reiniciar e o `daemon` não subir, nada
+detecta a falha. Para cobrir isso, agende **uma** entrada no Agendador do Windows
+chamando `lhub sched check` a cada 15 min — ele te avisa se o agendador morreu.
+
 ## Como funciona (resumo)
 
 - `.lhub/objects/`: objetos comprimidos (zlib), nomeados pelo hash SHA‑256 do

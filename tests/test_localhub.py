@@ -4,11 +4,13 @@ Roda com:  python -m unittest discover -s tests
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from datetime import datetime
 
 from localhub import porcelain, remote
 from localhub.objects import parse_commit
@@ -294,6 +296,93 @@ class Locking(unittest.TestCase):
             import shutil
 
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class Cron(unittest.TestCase):
+    def test_matches_next_prev(self):
+        from localhub.cron import CronExpr
+
+        mon = datetime(2024, 1, 1, 7, 0)       # 2024-01-01 = segunda-feira
+        self.assertEqual(mon.weekday(), 0)
+        cx = CronExpr("0 7 * * 1-5")           # 07:00, seg-sex
+        self.assertTrue(cx.matches(mon))
+        self.assertFalse(cx.matches(datetime(2024, 1, 1, 7, 1)))
+        sat = datetime(2024, 1, 6, 7, 0)       # sabado
+        self.assertEqual(sat.weekday(), 5)
+        self.assertFalse(cx.matches(sat))
+        self.assertEqual(cx.next_after(mon), datetime(2024, 1, 2, 7, 0))
+        self.assertEqual(cx.prev_at_or_before(datetime(2024, 1, 1, 7, 30)), mon)
+
+    def test_step_field(self):
+        from localhub.cron import CronExpr
+
+        cx = CronExpr("*/15 * * * *")
+        self.assertTrue(cx.matches(datetime(2026, 1, 1, 0, 0)))
+        self.assertTrue(cx.matches(datetime(2026, 1, 1, 0, 15)))
+        self.assertFalse(cx.matches(datetime(2026, 1, 1, 0, 16)))
+
+
+class Monitoring(unittest.TestCase):
+    def test_is_overdue(self):
+        from localhub.monitor import is_overdue
+
+        now = datetime(2026, 6, 18, 8, 0)
+        expected = datetime(2026, 6, 18, 7, 0)
+        self.assertTrue(is_overdue(expected, None, now, 5))                      # nunca rodou
+        self.assertFalse(is_overdue(expected, datetime(2026, 6, 18, 7, 1), now, 5))  # rodou depois
+        self.assertTrue(is_overdue(expected, datetime(2026, 6, 17, 7, 0), now, 5))   # so rodou antes
+        self.assertFalse(is_overdue(expected, None, datetime(2026, 6, 18, 7, 3), 5))  # dentro da folga
+        self.assertFalse(is_overdue(None, None, now, 5))                        # sem horario previsto
+
+    def test_webhook_payload(self):
+        from localhub.notify import _webhook_payload
+
+        self.assertEqual(_webhook_payload("discord", "x"), {"content": "x"})
+        self.assertEqual(_webhook_payload("slack", "x"), {"text": "x"})
+        self.assertEqual(_webhook_payload("teams", "x"), {"text": "x"})
+        self.assertEqual(_webhook_payload("json", "x"), {"message": "x"})
+
+
+class SchedulerRun(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="lhub_sched_")
+        self.addCleanup(lambda: shutil.rmtree(self.tmp, ignore_errors=True))
+
+    def _store(self):
+        from localhub import scheduler
+
+        return scheduler.Store(home=os.path.join(self.tmp, "home"))
+
+    def test_run_executes_and_records(self):
+        from localhub import scheduler
+
+        proj = os.path.join(self.tmp, "proj")
+        os.makedirs(proj)
+        wf = scheduler.normalize_workflow(
+            {"name": "demo", "python": sys.executable,
+             "steps": [{"run": "{python} -c \"open('out.txt','w').write('ok')\""}]},
+            proj,
+        )
+        store = self._store()
+        rec = scheduler.Scheduler(store)._execute(wf, proj, "manual")
+        self.assertEqual(rec["status"], "ok")
+        self.assertTrue(os.path.exists(os.path.join(proj, "out.txt")))
+        self.assertEqual(len(store.read_history()), 1)
+        self.assertTrue(os.path.exists(rec["log"]))
+
+    def test_failed_step_marks_failed(self):
+        from localhub import scheduler
+
+        proj = os.path.join(self.tmp, "proj")
+        os.makedirs(proj)
+        wf = scheduler.normalize_workflow(
+            {"name": "demo", "python": sys.executable,
+             "steps": [{"run": "{python} -c \"import sys; sys.exit(3)\""}]},
+            proj,
+        )
+        rec = scheduler.Scheduler(self._store())._execute(wf, proj, "manual")
+        self.assertEqual(rec["status"], "failed")
+        self.assertEqual(rec["steps"][0]["exit"], 3)
 
 
 class CliSmoke(unittest.TestCase):
